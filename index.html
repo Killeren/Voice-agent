@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI Voice Agent - Livekit & Cerebras</title>
+    <script src="https://unpkg.com/livekit-client/dist/livekit-client.umd.min.js"></script>
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>🎙️ AI Voice Agent</h1>
+            <p class="subtitle">Powered by Livekit & Cerebras</p>
+        </header>
+
+        <main>
+            <div class="status-card">
+                <div class="status-indicator" id="statusIndicator">
+                    <span class="status-dot"></span>
+                    <span id="statusText">Disconnected</span>
+                </div>
+            </div>
+
+            <div class="controls">
+                <button id="connectBtn" class="btn btn-primary">
+                    <span class="btn-icon">🔌</span>
+                    Connect
+                </button>
+                <button id="disconnectBtn" class="btn btn-secondary" disabled>
+                    <span class="btn-icon">🔌</span>
+                    Disconnect
+                </button>
+            </div>
+
+            <div class="audio-controls">
+                <div class="audio-control">
+                    <label for="micToggle">
+                        <span class="icon">🎤</span>
+                        Microphone
+                    </label>
+                    <button id="micToggle" class="toggle-btn" disabled>
+                        <span class="toggle-state">Off</span>
+                    </button>
+                </div>
+                <div class="audio-control">
+                    <label for="speakerToggle">
+                        <span class="icon">🔊</span>
+                        Speaker
+                    </label>
+                    <button id="speakerToggle" class="toggle-btn" disabled>
+                        <span class="toggle-state">Off</span>
+                    </button>
+                </div>
+            </div>
+
+            <div class="transcription-card">
+                <h3>📝 Conversation</h3>
+                <div id="transcription" class="transcription-content">
+                    <p class="placeholder">Connect to start the conversation...</p>
+                </div>
+            </div>
+
+            <div class="info-card">
+                <h4>ℹ️ How to use</h4>
+                <ul>
+                    <li>Click "Connect" to join the voice session</li>
+                    <li>Enable your microphone to speak with the AI</li>
+                    <li>Enable speaker to hear the AI's responses</li>
+                    <li>The AI uses Cerebras for fast, intelligent responses</li>
+                </ul>
+            </div>
+        </main>
+
+        <footer>
+            <p>Built with ❤️ using Livekit and Cerebras</p>
+        </footer>
+    </div>
+
+    <audio id="audioElement" autoplay></audio>
+
+    <script src="/static/app.js"></script>
+</body>
+</html>
