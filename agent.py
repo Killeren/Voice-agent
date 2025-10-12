@@ -15,10 +15,9 @@ from livekit.agents import (
     AgentSession, 
     JobContext, 
     WorkerOptions, 
-    cli,
-    RoomInputOptions
+    cli
 )
-from livekit.plugins import deepgram, openai, silero, noise_cancellation
+from livekit.plugins import deepgram, openai, silero, cartesia
 from livekit.plugins.turn_detector.multilingual import MultilingualModel
 
 # Load environment variables
@@ -31,7 +30,12 @@ logger = logging.getLogger(__name__)
 
 def prewarm(proc: agents.JobProcess):
     """Preload models to reduce cold start times"""
-    proc.userdata["vad"] = silero.VAD.load()
+    # Load VAD with more sensitive settings
+    proc.userdata["vad"] = silero.VAD.load(
+        min_speech_duration=0.1,  # Detect shorter speech (100ms)
+        min_silence_duration=0.3,  # Wait less time for silence (300ms)
+        activation_threshold=0.3,  # Lower threshold = more sensitive (default 0.5)
+    )
 
 
 async def entrypoint(ctx: JobContext):
@@ -68,15 +72,14 @@ async def entrypoint(ctx: JobContext):
         
         # LLM using Cerebras via OpenAI-compatible endpoint
         llm=openai.LLM.with_cerebras(
-            model="llama3.1-70b",  # Using Cerebras's fast Llama 3.1 70B
+            model="llama3.1-8b",  # Using Cerebras's Llama 3.1 8B (fast and available)
             temperature=0.7,
-            max_tokens=1024,
         ),
         
-        # Text-to-Speech using OpenAI
-        tts=openai.TTS(
-            model="tts-1",
-            voice="alloy",
+        # Text-to-Speech using Cartesia (no quota limits on free tier)
+        tts=cartesia.TTS(
+            model="sonic-2-2025-03-07",
+            voice="79a125e8-cd45-4c13-8a67-188112f4dd22",  # British Lady
             speed=1.0,
         ),
         
@@ -85,25 +88,41 @@ async def entrypoint(ctx: JobContext):
         
         # Additional configurations
         allow_interruptions=True,
-        int_min_words=0,  # Allow interruption at any point
-        int_speech_duration=0.5,  # Interrupt after 500ms of speech
-        
-        # Enable false interruption detection and auto-resume
-        false_interruption_timeout=3.0,
-        resume_false_interruption=True,
     )
     
-    # Start the session with enhanced room input options
+    # Set up event listeners for logging
+    @session.on("user_input_transcribed")
+    def on_user_transcribed(transcription: str):
+        """Log user's transcribed speech"""
+        logger.info(f"👤 USER SAID: {transcription}")
+        print(f"\n{'='*60}")
+        print(f"👤 USER: {transcription}")
+        print(f"{'='*60}\n")
+    
+    @session.on("conversation_item_added")
+    def on_conversation_item(item):
+        """Log conversation items"""
+        if hasattr(item, 'role') and hasattr(item, 'content'):
+            if item.role == 'assistant':
+                logger.info(f"🤖 AGENT RESPONDED: {item.content}")
+                print(f"\n{'='*60}")
+                print(f"🤖 AGENT: {item.content}")
+                print(f"{'='*60}\n")
+    
+    @session.on("user_state_changed")
+    def on_user_state_changed(state):
+        """Log when user state changes (listening, speaking, etc)"""
+        logger.info(f"🎤 USER STATE: {state}")
+    
+    @session.on("agent_state_changed")
+    def on_agent_state_changed(state):
+        """Log when agent state changes"""
+        logger.info(f"🤖 AGENT STATE: {state}")
+    
+    # Start the session
     await session.start(
         agent=agent,
         room=ctx.room,
-        room_input_options=RoomInputOptions(
-            # Enhanced noise cancellation (requires LiveKit Cloud or compatible server)
-            noise_cancellation=noise_cancellation.BVC(),
-            
-            # Auto-subscribe to audio tracks
-            auto_subscribe=True,
-        )
     )
     
     # Generate initial greeting
@@ -116,17 +135,29 @@ async def entrypoint(ctx: JobContext):
 
 def main():
     """Run the voice agent worker with optimized configuration"""
+    # Ensure required environment variables are set
+    livekit_url = os.getenv("LIVEKIT_URL")
+    livekit_api_key = os.getenv("LIVEKIT_API_KEY")
+    livekit_api_secret = os.getenv("LIVEKIT_API_SECRET")
+    
+    if not all([livekit_url, livekit_api_key, livekit_api_secret]):
+        raise ValueError("Missing required environment variables: LIVEKIT_URL, LIVEKIT_API_KEY, LIVEKIT_API_SECRET")
+    
+    # Type assertions after validation
+    assert livekit_url is not None
+    assert livekit_api_key is not None
+    assert livekit_api_secret is not None
+    
     cli.run_app(
         WorkerOptions(
             entrypoint_fnc=entrypoint,
             prewarm_fnc=prewarm,  # Add prewarming for better performance
             
             # Worker configuration for production
-            num_idle_workers=1,
             max_retry=3,
-            ws_url=os.getenv("LIVEKIT_URL"),
-            api_key=os.getenv("LIVEKIT_API_KEY"),
-            api_secret=os.getenv("LIVEKIT_API_SECRET"),
+            ws_url=livekit_url,
+            api_key=livekit_api_key,
+            api_secret=livekit_api_secret,
         )
     )
 
