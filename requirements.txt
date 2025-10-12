@@ -1,8 +1,20 @@
-livekit
-livekit-agents
-livekit-plugins-openai
-livekit-plugins-deepgram
-livekit-plugins-silero
-openai
-aiohttp
-python-dotenv
+# LiveKit Agents Framework (Latest)
+livekit-agents[openai,deepgram,silero,turn-detector,noise-cancellation]~=1.2.5
+
+# Core LiveKit packages
+livekit>=0.15.0
+livekit-plugins-openai>=0.7.0
+livekit-plugins-deepgram>=0.6.0
+livekit-plugins-silero>=0.5.0
+
+# Cerebras SDK for fast inference
+cerebras-cloud-sdk>=1.0.0
+
+# Utilities
+aiohttp>=3.9.0
+python-dotenv>=1.0.0
+
+# Optional: For enhanced features
+# livekit-plugins-cartesia  # Alternative TTS
+# livekit-plugins-assemblyai  # Alternative STT
+# livekit-plugins-elevenlabs  # Alternative TTS
