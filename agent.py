@@ -32,9 +32,10 @@ def prewarm(proc: agents.JobProcess):
     """Preload models to reduce cold start times"""
     # Load VAD with more sensitive settings
     proc.userdata["vad"] = silero.VAD.load(
-        min_speech_duration=0.1,  # Detect shorter speech (100ms)
-        min_silence_duration=0.3,  # Wait less time for silence (300ms)
-        activation_threshold=0.3,  # Lower threshold = more sensitive (default 0.5)
+        min_speech_duration=0.2,  # Detect shorter speech (200ms)
+        min_silence_duration=0.5,  # Wait less time for silence (500ms)  
+        activation_threshold=0.4,  # Lower threshold = more sensitive (default 0.5)
+        max_buffered_speech=60.0,  # Allow longer speech segments
     )
 
 

@@ -120,6 +120,21 @@ class VoiceAgentClient {
             this.updateStatus('Connecting...');
             this.connectBtn.disabled = true;
             
+            // Request microphone permissions first
+            console.log('🎤 Requesting microphone permissions...');
+            try {
+                const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+                console.log('✅ Microphone permission granted');
+                // Stop the test stream
+                stream.getTracks().forEach(track => track.stop());
+            } catch (permError) {
+                console.error('❌ Microphone permission denied:', permError);
+                alert('Microphone permission is required for voice interaction. Please allow microphone access and try again.');
+                this.connectBtn.disabled = false;
+                this.updateStatus('Microphone permission required');
+                return;
+            }
+            
             // Check if LiveKit client is loaded
             if (typeof LivekitClient === 'undefined') {
                 throw new Error('LiveKit client library not loaded. Please refresh the page.');
@@ -150,13 +165,21 @@ class VoiceAgentClient {
             this.micToggle.disabled = false;
             this.speakerToggle.disabled = false;
             
+            // Automatically enable microphone after connection
+            console.log('🎤 Enabling microphone...');
+            await this.enableMicrophone();
+            
+            // Enable speaker for audio output
+            console.log('🔊 Enabling speaker...');
+            this.enableSpeaker();
+            
             // Enable microphone by default
             await this.enableMicrophone();
             
             // Enable speaker by default
             await this.enableSpeaker();
             
-            this.addMessage('assistant', 'Hello! I\'m your AI voice assistant. How can I help you today?');
+            console.log('✅ Connection setup complete. Waiting for agent greeting...');
             
         } catch (error) {
             console.error('Connection error:', error);
@@ -186,13 +209,22 @@ class VoiceAgentClient {
             console.log('Track subscribed:', track.kind, 'from participant:', participant.identity);
             
             if (track.kind === LivekitClient.Track.Kind.Audio) {
+                console.log('🔊 Setting up audio track from agent...');
                 this.remoteAudioTrack = track;
+                
+                // Attach the track to create an audio element
                 const audioElement = track.attach();
                 
-                // Set up audio element for playback
+                // Configure audio element for optimal playback
                 audioElement.autoplay = true;
                 audioElement.playsInline = true;
+                audioElement.volume = 1.0;
+                
+                // Replace our existing audio element's source
                 this.audioElement.srcObject = audioElement.srcObject;
+                this.audioElement.autoplay = true;
+                this.audioElement.playsInline = true;
+                this.audioElement.volume = 1.0;
                 
                 // Force audio play with user interaction context
                 const playAudio = async () => {
@@ -208,6 +240,9 @@ class VoiceAgentClient {
                 
                 // Try to play immediately
                 playAudio();
+                
+                // Also append the original audio element to DOM for fallback
+                document.body.appendChild(audioElement);
             }
         });
         
@@ -230,6 +265,25 @@ class VoiceAgentClient {
             } catch (error) {
                 console.error('Error parsing data:', error);
             }
+        });
+        
+        // Track participant events for debugging
+        this.room.on(LivekitClient.RoomEvent.ParticipantConnected, (participant) => {
+            console.log('🤝 Participant connected:', participant.identity);
+        });
+        
+        this.room.on(LivekitClient.RoomEvent.ParticipantDisconnected, (participant) => {
+            console.log('👋 Participant disconnected:', participant.identity);
+        });
+        
+        // Track audio activity
+        this.room.on(LivekitClient.RoomEvent.ActiveSpeakersChanged, (speakers) => {
+            console.log('🗣️ Active speakers:', speakers.map(s => s.identity));
+        });
+        
+        // Track connection quality
+        this.room.on(LivekitClient.RoomEvent.ConnectionQualityChanged, (quality, participant) => {
+            console.log('📶 Connection quality:', quality, 'for', participant?.identity || 'local');
         });
     }
     
