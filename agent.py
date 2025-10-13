@@ -1,5 +1,6 @@
 """
-AI Voice Agent using Livekit and Cerebras
+AI Voice Agent using LiveKit Agents 1.0+ and Cerebras Inference API
+Updated for latest API compatibility and best practices
 """
 
 import asyncio
@@ -9,10 +10,15 @@ from typing import Annotated
 
 from dotenv import load_dotenv
 from livekit import agents, rtc
-from livekit.agents import JobContext, WorkerOptions, cli, tokenize, tts
-from livekit.agents.llm import ChatContext, ChatMessage
-from livekit.agents.voice_assistant import VoiceAssistant
-from livekit.plugins import deepgram, openai, silero
+from livekit.agents import (
+    Agent,
+    AgentSession, 
+    JobContext, 
+    WorkerOptions, 
+    cli
+)
+from livekit.plugins import deepgram, openai, silero, cartesia
+from livekit.plugins.turn_detector.multilingual import MultilingualModel
 
 # Load environment variables
 load_dotenv()
@@ -22,165 +28,137 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 
-class CerebrasLLM:
-    """Custom LLM wrapper for Cerebras API"""
-    
-    def __init__(self, api_key: str, model: str = "llama3.1-8b"):
-        self.api_key = api_key
-        self.model = model
-        self.base_url = "https://api.cerebras.ai/v1"
-        
-    async def chat(
-        self,
-        chat_ctx: ChatContext,
-        fnc_ctx: None = None,
-    ) -> "LLMStream":
-        """Generate chat completion using Cerebras API"""
-        import aiohttp
-        
-        messages = []
-        for msg in chat_ctx.messages:
-            role = msg.role
-            if role == "model":
-                role = "assistant"
-            messages.append({
-                "role": role,
-                "content": msg.content
-            })
-        
-        headers = {
-            "Authorization": f"Bearer {self.api_key}",
-            "Content-Type": "application/json"
-        }
-        
-        data = {
-            "model": self.model,
-            "messages": messages,
-            "stream": True,
-            "max_tokens": 1024,
-            "temperature": 0.7
-        }
-        
-        return LLMStream(self.base_url, headers, data)
-
-
-class LLMStream:
-    """Stream handler for Cerebras LLM responses"""
-    
-    def __init__(self, base_url: str, headers: dict, data: dict):
-        self.base_url = base_url
-        self.headers = headers
-        self.data = data
-        self._session = None
-        self._response = None
-        
-    async def __aiter__(self):
-        import aiohttp
-        import json
-        
-        self._session = aiohttp.ClientSession()
-        try:
-            self._response = await self._session.post(
-                f"{self.base_url}/chat/completions",
-                headers=self.headers,
-                json=self.data
-            )
-            
-            async for line in self._response.content:
-                line = line.decode('utf-8').strip()
-                if line.startswith('data: '):
-                    line = line[6:]
-                    if line == '[DONE]':
-                        break
-                    try:
-                        chunk = json.loads(line)
-                        if 'choices' in chunk and len(chunk['choices']) > 0:
-                            delta = chunk['choices'][0].get('delta', {})
-                            content = delta.get('content', '')
-                            if content:
-                                yield ChatChunk(content=content)
-                    except json.JSONDecodeError:
-                        continue
-        finally:
-            if self._response:
-                self._response.close()
-            if self._session:
-                await self._session.close()
-
-
-class ChatChunk:
-    """Represents a chunk of LLM response"""
-    
-    def __init__(self, content: str):
-        self.choices = [type('Choice', (), {
-            'delta': type('Delta', (), {
-                'content': content,
-                'role': 'assistant'
-            })()
-        })()]
+def prewarm(proc: agents.JobProcess):
+    """Preload models to reduce cold start times"""
+    # Load VAD with more sensitive settings
+    proc.userdata["vad"] = silero.VAD.load(
+        min_speech_duration=0.2,  # Detect shorter speech (200ms)
+        min_silence_duration=0.5,  # Wait less time for silence (500ms)  
+        activation_threshold=0.4,  # Lower threshold = more sensitive (default 0.5)
+        max_buffered_speech=60.0,  # Allow longer speech segments
+    )
 
 
 async def entrypoint(ctx: JobContext):
-    """Main entrypoint for the voice agent"""
+    """Main entrypoint for the voice agent using latest LiveKit Agents API"""
     
     logger.info(f"Connecting to room: {ctx.room.name}")
+    await ctx.connect(auto_subscribe=agents.AutoSubscribe.AUDIO_ONLY)
     
-    # Initialize speech-to-text
-    stt = deepgram.STT(
-        api_key=os.getenv("DEEPGRAM_API_KEY"),
+    # Wait for the first participant to connect
+    participant = await ctx.wait_for_participant()
+    logger.info(f"Starting voice assistant for participant {participant.identity}")
+    
+    # Create the agent with instructions
+    agent = Agent(
+        instructions=(
+            "You are a helpful AI voice assistant. "
+            "Keep your responses concise and conversational. "
+            "You are speaking, not writing, so avoid using special characters or formatting. "
+            "Be friendly, helpful, and natural in your responses."
+        )
     )
     
-    # Initialize text-to-speech
-    tts_plugin = openai.TTS(
-        model="tts-1",
-        voice="alloy",
-    )
-    
-    # Initialize Cerebras LLM
-    cerebras_api_key = os.getenv("CEREBRAS_API_KEY")
-    if not cerebras_api_key:
-        logger.error("CEREBRAS_API_KEY not found in environment")
-        return
+    # Initialize the agent session with the latest API
+    session = AgentSession(
+        # Use VAD from userdata (prewarmed)
+        vad=ctx.proc.userdata["vad"],
         
-    llm = CerebrasLLM(api_key=cerebras_api_key)
-    
-    # Create initial chat context
-    initial_ctx = ChatContext(
-        messages=[
-            ChatMessage(
-                role="system",
-                content=(
-                    "You are a helpful AI voice assistant. "
-                    "Keep your responses concise and conversational. "
-                    "You are speaking, not writing, so avoid using special characters or formatting."
-                )
-            )
-        ]
+        # Speech-to-Text using Deepgram
+        stt=deepgram.STT(
+            model="nova-2",
+            language="en",
+            smart_format=True,
+        ),
+        
+        # LLM using Cerebras via OpenAI-compatible endpoint
+        llm=openai.LLM.with_cerebras(
+            model="llama3.1-8b",  # Using Cerebras's Llama 3.1 8B (fast and available)
+            temperature=0.7,
+        ),
+        
+        # Text-to-Speech using Cartesia (no quota limits on free tier)
+        tts=cartesia.TTS(
+            model="sonic-2-2025-03-07",
+            voice="79a125e8-cd45-4c13-8a67-188112f4dd22",  # British Lady
+            speed=1.0,
+        ),
+        
+        # Advanced turn detection for natural conversations
+        turn_detection=MultilingualModel(),
+        
+        # Additional configurations
+        allow_interruptions=True,
     )
     
-    # Create voice assistant
-    assistant = VoiceAssistant(
-        vad=silero.VAD.load(),
-        stt=stt,
-        llm=llm,
-        tts=tts_plugin,
-        chat_ctx=initial_ctx,
+    # Set up event listeners for logging
+    @session.on("user_input_transcribed")
+    def on_user_transcribed(transcription: str):
+        """Log user's transcribed speech"""
+        logger.info(f"👤 USER SAID: {transcription}")
+        print(f"\n{'='*60}")
+        print(f"👤 USER: {transcription}")
+        print(f"{'='*60}\n")
+    
+    @session.on("conversation_item_added")
+    def on_conversation_item(item):
+        """Log conversation items"""
+        if hasattr(item, 'role') and hasattr(item, 'content'):
+            if item.role == 'assistant':
+                logger.info(f"🤖 AGENT RESPONDED: {item.content}")
+                print(f"\n{'='*60}")
+                print(f"🤖 AGENT: {item.content}")
+                print(f"{'='*60}\n")
+    
+    @session.on("user_state_changed")
+    def on_user_state_changed(state):
+        """Log when user state changes (listening, speaking, etc)"""
+        logger.info(f"🎤 USER STATE: {state}")
+    
+    @session.on("agent_state_changed")
+    def on_agent_state_changed(state):
+        """Log when agent state changes"""
+        logger.info(f"🤖 AGENT STATE: {state}")
+    
+    # Start the session
+    await session.start(
+        agent=agent,
+        room=ctx.room,
     )
     
-    # Start the assistant
-    assistant.start(ctx.room)
+    # Generate initial greeting
+    await session.generate_reply(
+        instructions="Greet the user warmly and ask how you can help them today."
+    )
     
-    # Greet the user
-    await assistant.say("Hello! I'm your AI voice assistant. How can I help you today?", allow_interruptions=True)
-    
-    logger.info("Voice assistant started successfully")
+    logger.info("Voice assistant started successfully with latest LiveKit Agents API")
 
 
 def main():
-    """Run the voice agent worker"""
+    """Run the voice agent worker with optimized configuration"""
+    # Ensure required environment variables are set
+    livekit_url = os.getenv("LIVEKIT_URL")
+    livekit_api_key = os.getenv("LIVEKIT_API_KEY")
+    livekit_api_secret = os.getenv("LIVEKIT_API_SECRET")
+    
+    if not all([livekit_url, livekit_api_key, livekit_api_secret]):
+        raise ValueError("Missing required environment variables: LIVEKIT_URL, LIVEKIT_API_KEY, LIVEKIT_API_SECRET")
+    
+    # Type assertions after validation
+    assert livekit_url is not None
+    assert livekit_api_key is not None
+    assert livekit_api_secret is not None
+    
     cli.run_app(
         WorkerOptions(
             entrypoint_fnc=entrypoint,
+            prewarm_fnc=prewarm,  # Add prewarming for better performance
+            
+            # Worker configuration for production
+            max_retry=3,
+            ws_url=livekit_url,
+            api_key=livekit_api_key,
+            api_secret=livekit_api_secret,
         )
     )
 

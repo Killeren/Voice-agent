@@ -62,7 +62,10 @@ async def handle_token_request(request):
     """Handle token generation requests"""
     try:
         data = await request.json()
-        room_name = data.get("room", "voice-agent-room")
+        logger.info(f"Received token request data: {data}")
+        
+        # Generate unique room name for each session to ensure fresh agent greeting
+        room_name = data.get("room", f"voice-agent-room-{datetime.now().timestamp()}")
         participant_name = data.get("participant", f"user-{datetime.now().timestamp()}")
         
         token_gen = TokenGenerator()
