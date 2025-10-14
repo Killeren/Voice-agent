@@ -150,37 +150,103 @@ main {
     border: 2px solid #e9ecef;
 }
 
-.audio-control label {
+.audio-control .control-label {
     display: flex;
     align-items: center;
     gap: 10px;
     font-weight: 600;
     font-size: 1rem;
+    cursor: default;
 }
 
 .icon {
     font-size: 1.5rem;
 }
 
-.toggle-btn {
-    padding: 8px 20px;
-    border: 2px solid #667eea;
-    background: white;
-    color: #667eea;
-    border-radius: 20px;
-    font-weight: 600;
-    cursor: pointer;
-    transition: all 0.3s ease;
+/* Modern Toggle Switch Styles */
+.toggle-switch {
+    position: relative;
+    display: inline-block;
+    width: 60px;
+    height: 32px;
 }
 
-.toggle-btn:disabled {
+.toggle-input {
+    opacity: 0;
+    width: 0;
+    height: 0;
+    position: absolute;
+}
+
+.toggle-slider {
+    position: absolute;
+    cursor: pointer;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: linear-gradient(135deg, #ddd 0%, #ccc 100%);
+    border-radius: 32px;
+    transition: all 0.4s cubic-bezier(0.4, 0.0, 0.2, 1);
+    display: flex;
+    align-items: center;
+    box-shadow: inset 0 2px 4px rgba(0,0,0,0.1);
+}
+
+.toggle-knob {
+    position: absolute;
+    height: 26px;
+    width: 26px;
+    left: 3px;
+    background: white;
+    border-radius: 50%;
+    transition: all 0.4s cubic-bezier(0.4, 0.0, 0.2, 1);
+    box-shadow: 0 2px 8px rgba(0,0,0,0.15);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+/* Active state */
+.toggle-input:checked + .toggle-slider {
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    box-shadow: inset 0 2px 4px rgba(102, 126, 234, 0.2);
+}
+
+.toggle-input:checked + .toggle-slider .toggle-knob {
+    transform: translateX(28px);
+    box-shadow: 0 2px 12px rgba(102, 126, 234, 0.3);
+}
+
+/* Disabled state */
+.toggle-input:disabled + .toggle-slider {
     opacity: 0.5;
+    cursor: not-allowed;
+    background: #e9ecef;
+}
+
+.toggle-input:disabled + .toggle-slider .toggle-knob {
     cursor: not-allowed;
 }
 
-.toggle-btn.active {
-    background: #667eea;
-    color: white;
+/* Hover effects for enabled toggles */
+.toggle-input:not(:disabled) + .toggle-slider:hover {
+    box-shadow: inset 0 2px 4px rgba(0,0,0,0.15), 0 0 0 4px rgba(102, 126, 234, 0.1);
+}
+
+.toggle-input:not(:disabled):checked + .toggle-slider:hover {
+    box-shadow: inset 0 2px 4px rgba(102, 126, 234, 0.3), 0 0 0 4px rgba(102, 126, 234, 0.15);
+}
+
+/* Focus styles for accessibility */
+.toggle-input:focus + .toggle-slider {
+    outline: 2px solid #667eea;
+    outline-offset: 2px;
+}
+
+/* Remove old toggle button styles */
+.toggle-btn {
+    display: none;
 }
 
 .transcription-card {

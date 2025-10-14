@@ -29,8 +29,8 @@ class VoiceAgentClient {
     attachEventListeners() {
         this.connectBtn.addEventListener('click', () => this.connect());
         this.disconnectBtn.addEventListener('click', () => this.disconnect());
-        this.micToggle.addEventListener('click', () => this.toggleMicrophone());
-        this.pauseToggle.addEventListener('click', () => this.togglePause());
+        this.micToggle.addEventListener('change', () => this.toggleMicrophone());
+        this.pauseToggle.addEventListener('change', () => this.togglePause());
     }
     
     updateStatus(status, isConnected = false) {
@@ -165,8 +165,9 @@ class VoiceAgentClient {
             this.micToggle.disabled = false;
             this.pauseToggle.disabled = false;
             
-            // Automatically enable microphone after connection
+            // Automatically enable microphone after connection and set toggle to ON
             console.log('🎤 Enabling microphone...');
+            this.micToggle.checked = true; // Set toggle to ON first
             await this.enableMicrophone();
             
             console.log('✅ Connection setup complete. Waiting for agent greeting...');
@@ -294,8 +295,7 @@ class VoiceAgentClient {
             
             this.localAudioTrack.unmute();
             this.isMicEnabled = true;
-            this.micToggle.classList.add('active');
-            this.micToggle.querySelector('.toggle-state').textContent = 'On';
+            this.micToggle.checked = true;
             
             console.log('✅ Microphone enabled and publishing audio');
             
@@ -314,24 +314,22 @@ class VoiceAgentClient {
         if (this.localAudioTrack) {
             this.localAudioTrack.mute();
             this.isMicEnabled = false;
-            this.micToggle.classList.remove('active');
-            this.micToggle.querySelector('.toggle-state').textContent = 'Off';
+            this.micToggle.checked = false;
         }
     }
     
     async toggleMicrophone() {
-        if (this.isMicEnabled) {
-            this.disableMicrophone();
-        } else {
+        if (this.micToggle.checked) {
             await this.enableMicrophone();
+        } else {
+            this.disableMicrophone();
         }
     }
     
     async pauseAgent() {
         console.log('⏸️ Pausing agent...');
         this.isPaused = true;
-        this.pauseToggle.classList.add('active');
-        this.pauseToggle.querySelector('.toggle-state').textContent = 'On';
+        this.pauseToggle.checked = true;
         
         // Stop current audio playback
         this.audioElement.pause();
@@ -356,11 +354,10 @@ class VoiceAgentClient {
     async resumeAgent() {
         console.log('▶️ Resuming agent...');
         this.isPaused = false;
-        this.pauseToggle.classList.remove('active');
-        this.pauseToggle.querySelector('.toggle-state').textContent = 'Off';
+        this.pauseToggle.checked = false;
         
-        // Re-enable microphone
-        if (this.localAudioTrack) {
+        // Re-enable microphone if it was enabled before
+        if (this.micToggle.checked && this.localAudioTrack) {
             this.localAudioTrack.unmute();
         }
         
@@ -380,10 +377,10 @@ class VoiceAgentClient {
     }
     
     async togglePause() {
-        if (this.isPaused) {
-            await this.resumeAgent();
-        } else {
+        if (this.pauseToggle.checked) {
             await this.pauseAgent();
+        } else {
+            await this.resumeAgent();
         }
     }
     
@@ -409,8 +406,10 @@ class VoiceAgentClient {
         this.remoteAudioTrack = null;
         this.isMicEnabled = false;
         this.isPaused = false;
-        this.micToggle.classList.remove('active');
-        this.pauseToggle.classList.remove('active');
+        
+        // Reset toggle switches to OFF state
+        this.micToggle.checked = false;
+        this.pauseToggle.checked = false;
         
         this.room = null;
     }

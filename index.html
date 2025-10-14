@@ -35,22 +35,28 @@
 
             <div class="audio-controls">
                 <div class="audio-control">
-                    <label for="micToggle">
+                    <label for="micToggle" class="control-label">
                         <span class="icon">🎤</span>
                         Microphone
                     </label>
-                    <button id="micToggle" class="toggle-btn" disabled>
-                        <span class="toggle-state">Off</span>
-                    </button>
+                    <div class="toggle-switch">
+                        <input type="checkbox" id="micToggle" class="toggle-input" disabled>
+                        <label for="micToggle" class="toggle-slider">
+                            <span class="toggle-knob"></span>
+                        </label>
+                    </div>
                 </div>
                 <div class="audio-control">
-                    <label for="pauseToggle">
+                    <label for="pauseToggle" class="control-label">
                         <span class="icon">⏸️</span>
                         Pause Agent
                     </label>
-                    <button id="pauseToggle" class="toggle-btn" disabled>
-                        <span class="toggle-state">Off</span>
-                    </button>
+                    <div class="toggle-switch">
+                        <input type="checkbox" id="pauseToggle" class="toggle-input" disabled>
+                        <label for="pauseToggle" class="toggle-slider">
+                            <span class="toggle-knob"></span>
+                        </label>
+                    </div>
                 </div>
             </div>
 
