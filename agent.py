@@ -6,6 +6,8 @@ Updated for latest API compatibility and best practices
 import asyncio
 import logging
 import os
+import json
+import aiohttp
 from typing import Annotated
 
 from dotenv import load_dotenv
@@ -26,6 +28,59 @@ load_dotenv()
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+
+async def search_perplexity(query: str) -> str:
+    """Search Perplexity API for context related to the user's query"""
+    try:
+        perplexity_api_key = os.getenv("PERPLEXITY_API_KEY")
+        if not perplexity_api_key:
+            logger.warning("PERPLEXITY_API_KEY not found in environment variables")
+            return ""
+        
+        url = "https://api.perplexity.ai/chat/completions"
+        
+        headers = {
+            "Authorization": f"Bearer {perplexity_api_key}",
+            "Content-Type": "application/json",
+        }
+        
+        payload = {
+            "model": "sonar",
+            "messages": [
+                {
+                    "role": "user",
+                    "content": f"Provide a brief summary of current information about: {query}"
+                }
+            ],
+            "max_tokens": 300,
+            "temperature": 0.2
+        }
+        
+        timeout = aiohttp.ClientTimeout(total=30)
+        async with aiohttp.ClientSession(timeout=timeout) as session:
+            async with session.post(url, json=payload, headers=headers) as response:
+                if response.status == 200:
+                    data = await response.json()
+                    content = data.get("choices", [{}])[0].get("message", {}).get("content", "")
+                    
+                    if content:
+                        logger.info(f"🔍 PERPLEXITY CONTEXT: {content[:100]}...")
+                        return content
+                    else:
+                        logger.warning("No content received from Perplexity API")
+                        return ""
+                else:
+                    error_text = await response.text()
+                    logger.error(f"Perplexity API error {response.status}: {error_text}")
+                    return ""
+            
+    except asyncio.TimeoutError:
+        logger.error("Perplexity API request timed out")
+        return ""
+    except Exception as e:
+        logger.error(f"Unexpected error in Perplexity search: {e}")
+        return ""
 
 
 def prewarm(proc: agents.JobProcess):
@@ -52,11 +107,19 @@ async def entrypoint(ctx: JobContext):
     # Create the agent with instructions
     agent = Agent(
         instructions=(
-            "You are a helpful AI voice assistant. "
+            "You are a helpful AI voice assistant with access to current information. "
+            "When provided with context from search results, incorporate that information naturally into your responses. "
             "Keep your responses concise and conversational. "
             "You are speaking, not writing, so avoid using special characters or formatting. "
-            "Be friendly, helpful, and natural in your responses."
+            "Be friendly, helpful, and natural in your responses. "
+            "If you have recent information about a topic, mention that it's current or recent information."
         )
+    )
+    
+    # Store the original LLM for context-aware responses
+    base_llm = openai.LLM.with_cerebras(
+        model="llama3.1-8b",
+        temperature=0.7,
     )
     
     # Initialize the agent session with the latest API
@@ -72,15 +135,12 @@ async def entrypoint(ctx: JobContext):
         ),
         
         # LLM using Cerebras via OpenAI-compatible endpoint
-        llm=openai.LLM.with_cerebras(
-            model="llama3.1-8b",  # Using Cerebras's Llama 3.1 8B (fast and available)
-            temperature=0.7,
-        ),
+        llm=base_llm,
         
-        # Text-to-Speech using Cartesia (no quota limits on free tier)
-        tts=cartesia.TTS(
-            model="sonic-2-2025-03-07",
-            voice="79a125e8-cd45-4c13-8a67-188112f4dd22",  # British Lady
+        # Text-to-Speech using OpenAI (more reliable than Cartesia free tier)
+        tts=openai.TTS(
+            voice="alloy",
+            model="tts-1",
             speed=1.0,
         ),
         
@@ -91,13 +151,14 @@ async def entrypoint(ctx: JobContext):
         allow_interruptions=True,
     )
     
-    # Track pause state
+    # Track pause state and search queries
     is_paused = False
+    pending_search_queries = []
     
-    # Set up event listeners for logging
+    # Set up event listeners for logging and Perplexity integration
     @session.on("user_input_transcribed")
     def on_user_transcribed(transcription: str):
-        """Log user's transcribed speech"""
+        """Log user's transcribed speech and trigger Perplexity search if needed"""
         logger.info(f"👤 USER SAID: {transcription}")
         print(f"\n{'='*60}")
         print(f"👤 USER: {transcription}")
@@ -107,21 +168,72 @@ async def entrypoint(ctx: JobContext):
         if is_paused:
             logger.info("⏸️ Agent is paused - ignoring user input")
             return
+        
+        # Check if the user's question would benefit from current information
+        search_keywords = [
+            'what is', 'who is', 'when did', 'how to', 'latest', 'recent', 'current', 
+            'news', 'update', 'today', 'now', 'happening', 'what happened',
+            'tell me about', 'explain', 'information about', 'search for',
+            'find', 'look up', 'details about', 'facts about'
+        ]
+        
+        # Check if the query contains search-worthy keywords and is substantial
+        should_search = (
+            any(keyword in transcription.lower() for keyword in search_keywords) and 
+            len(transcription.strip()) > 10 and
+            not is_paused
+        )
+        
+        if should_search:
+            logger.info(f"🔍 User query detected for Perplexity search: {transcription}")
+            # Store the transcription for use in the conversation handler
+            pending_search_queries.append(transcription)
     
     @session.on("conversation_item_added")
     def on_conversation_item(item):
-        """Log conversation items and handle pause state"""
+        """Log conversation items and handle context enhancement with Perplexity"""
+        async def handle_user_query():
+            """Async handler for user queries with Perplexity search"""
+            user_query = item.content
+            search_keywords = [
+                'what is', 'who is', 'when did', 'how to', 'latest', 'recent', 'current', 
+                'news', 'update', 'today', 'now', 'happening', 'what happened',
+                'tell me about', 'explain', 'information about'
+            ]
+            
+            should_search = any(keyword in user_query.lower() for keyword in search_keywords)
+            
+            if should_search and len(user_query.strip()) > 10 and not is_paused:
+                logger.info(f"🔍 Searching Perplexity for context: {user_query}")
+                context = await search_perplexity(user_query)
+                
+                if context:
+                    # Generate response with context
+                    enhanced_instruction = (
+                        f"Based on this current information: {context}\n\n"
+                        f"Please respond to the user's question naturally and conversationally. "
+                        f"Incorporate the relevant information from the context if it helps answer their question. "
+                        f"Keep your response concise and natural for voice conversation."
+                    )
+                    
+                    # Generate reply with enhanced context
+                    await session.generate_reply(instructions=enhanced_instruction)
+        
         if hasattr(item, 'role') and hasattr(item, 'content'):
-            if item.role == 'assistant':
+            if item.role == 'user':
+                # If we're paused, don't generate responses
+                if is_paused:
+                    logger.info("⏸️ Agent is paused - not generating response")
+                    return
+                
+                # Create async task for handling user query with Perplexity
+                asyncio.create_task(handle_user_query())
+            
+            elif item.role == 'assistant':
                 logger.info(f"🤖 AGENT RESPONDED: {item.content}")
                 print(f"\n{'='*60}")
                 print(f"🤖 AGENT: {item.content}")
                 print(f"{'='*60}\n")
-        
-        # If we're paused, don't generate responses
-        if is_paused and hasattr(item, 'role') and item.role == 'user':
-            logger.info("⏸️ Agent is paused - not generating response")
-            return
     
     @session.on("user_state_changed")
     def on_user_state_changed(state):
@@ -196,7 +308,7 @@ def main():
     cli.run_app(
         WorkerOptions(
             entrypoint_fnc=entrypoint,
-            prewarm_fnc=prewarm,  # Add prewarming for better performance
+            prewarm_fnc=prewarm,
         )
     )
 
