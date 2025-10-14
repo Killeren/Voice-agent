@@ -9,7 +9,7 @@ class VoiceAgentClient {
         this.localAudioTrack = null;
         this.remoteAudioTrack = null;
         this.isMicEnabled = false;
-        this.isSpeakerEnabled = false;
+        this.isPaused = false;
         
         this.initializeUI();
         this.attachEventListeners();
@@ -21,7 +21,7 @@ class VoiceAgentClient {
         this.connectBtn = document.getElementById('connectBtn');
         this.disconnectBtn = document.getElementById('disconnectBtn');
         this.micToggle = document.getElementById('micToggle');
-        this.speakerToggle = document.getElementById('speakerToggle');
+        this.pauseToggle = document.getElementById('pauseToggle');
         this.transcription = document.getElementById('transcription');
         this.audioElement = document.getElementById('audioElement');
     }
@@ -30,7 +30,7 @@ class VoiceAgentClient {
         this.connectBtn.addEventListener('click', () => this.connect());
         this.disconnectBtn.addEventListener('click', () => this.disconnect());
         this.micToggle.addEventListener('click', () => this.toggleMicrophone());
-        this.speakerToggle.addEventListener('click', () => this.toggleSpeaker());
+        this.pauseToggle.addEventListener('click', () => this.togglePause());
     }
     
     updateStatus(status, isConnected = false) {
@@ -163,21 +163,11 @@ class VoiceAgentClient {
             this.updateStatus('Connected', true);
             this.disconnectBtn.disabled = false;
             this.micToggle.disabled = false;
-            this.speakerToggle.disabled = false;
+            this.pauseToggle.disabled = false;
             
             // Automatically enable microphone after connection
             console.log('🎤 Enabling microphone...');
             await this.enableMicrophone();
-            
-            // Enable speaker for audio output
-            console.log('🔊 Enabling speaker...');
-            this.enableSpeaker();
-            
-            // Enable microphone by default
-            await this.enableMicrophone();
-            
-            // Enable speaker by default
-            await this.enableSpeaker();
             
             console.log('✅ Connection setup complete. Waiting for agent greeting...');
             
@@ -337,25 +327,63 @@ class VoiceAgentClient {
         }
     }
     
-    async enableSpeaker() {
-        this.isSpeakerEnabled = true;
-        this.speakerToggle.classList.add('active');
-        this.speakerToggle.querySelector('.toggle-state').textContent = 'On';
-        this.audioElement.muted = false;
+    async pauseAgent() {
+        console.log('⏸️ Pausing agent...');
+        this.isPaused = true;
+        this.pauseToggle.classList.add('active');
+        this.pauseToggle.querySelector('.toggle-state').textContent = 'On';
+        
+        // Stop current audio playback
+        this.audioElement.pause();
+        
+        // Disable microphone to stop listening
+        if (this.localAudioTrack) {
+            this.localAudioTrack.mute();
+        }
+        
+        // Send a message to pause the agent session if possible
+        if (this.room && this.room.localParticipant) {
+            try {
+                const encoder = new TextEncoder();
+                const data = encoder.encode(JSON.stringify({ action: 'pause' }));
+                await this.room.localParticipant.publishData(data);
+            } catch (error) {
+                console.warn('Could not send pause signal:', error);
+            }
+        }
     }
     
-    disableSpeaker() {
-        this.isSpeakerEnabled = false;
-        this.speakerToggle.classList.remove('active');
-        this.speakerToggle.querySelector('.toggle-state').textContent = 'Off';
-        this.audioElement.muted = true;
+    async resumeAgent() {
+        console.log('▶️ Resuming agent...');
+        this.isPaused = false;
+        this.pauseToggle.classList.remove('active');
+        this.pauseToggle.querySelector('.toggle-state').textContent = 'Off';
+        
+        // Re-enable microphone
+        if (this.localAudioTrack) {
+            this.localAudioTrack.unmute();
+        }
+        
+        // Send resume signal and request short greeting
+        if (this.room && this.room.localParticipant) {
+            try {
+                const encoder = new TextEncoder();
+                const data = encoder.encode(JSON.stringify({ 
+                    action: 'resume',
+                    requestGreeting: true 
+                }));
+                await this.room.localParticipant.publishData(data);
+            } catch (error) {
+                console.warn('Could not send resume signal:', error);
+            }
+        }
     }
     
-    async toggleSpeaker() {
-        if (this.isSpeakerEnabled) {
-            this.disableSpeaker();
+    async togglePause() {
+        if (this.isPaused) {
+            await this.resumeAgent();
         } else {
-            await this.enableSpeaker();
+            await this.pauseAgent();
         }
     }
     
@@ -371,7 +399,7 @@ class VoiceAgentClient {
         this.connectBtn.disabled = false;
         this.disconnectBtn.disabled = true;
         this.micToggle.disabled = true;
-        this.speakerToggle.disabled = true;
+        this.pauseToggle.disabled = true;
         
         if (this.localAudioTrack) {
             this.localAudioTrack.stop();
@@ -380,9 +408,9 @@ class VoiceAgentClient {
         
         this.remoteAudioTrack = null;
         this.isMicEnabled = false;
-        this.isSpeakerEnabled = false;
+        this.isPaused = false;
         this.micToggle.classList.remove('active');
-        this.speakerToggle.classList.remove('active');
+        this.pauseToggle.classList.remove('active');
         
         this.room = null;
     }
