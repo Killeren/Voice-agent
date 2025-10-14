@@ -19,8 +19,10 @@ from livekit.agents import (
     WorkerOptions, 
     cli
 )
-from livekit.plugins import deepgram, openai, silero, cartesia
-from livekit.plugins.turn_detector.multilingual import MultilingualModel
+from livekit.plugins import deepgram, openai, silero
+
+# Import custom Edge TTS plugin
+from edge_tts_plugin import EdgeTTS
 
 # Load environment variables
 load_dotenv()
@@ -137,15 +139,12 @@ async def entrypoint(ctx: JobContext):
         # LLM using Cerebras via OpenAI-compatible endpoint
         llm=base_llm,
         
-        # Text-to-Speech using OpenAI (more reliable than Cartesia free tier)
-        tts=openai.TTS(
-            voice="alloy",
-            model="tts-1",
-            speed=1.0,
+        # Text-to-Speech using Edge TTS (free, no API key required)
+        tts=EdgeTTS(
+            voice="en-US-AriaNeural",  # High quality female voice
+            rate="+10%",  # Slightly faster speech
+            use_fallback=True,  # Use gTTS as fallback if Edge TTS fails
         ),
-        
-        # Advanced turn detection for natural conversations
-        turn_detection=MultilingualModel(),
         
         # Additional configurations
         allow_interruptions=True,

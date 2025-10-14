@@ -6,7 +6,10 @@ livekit>=0.15.0
 livekit-plugins-openai>=0.7.0
 livekit-plugins-deepgram>=0.6.0
 livekit-plugins-silero>=0.5.0
-livekit-plugins-cartesia>=0.1.0
+
+# TTS Engines (Free, no API key required)
+edge-tts>=6.1.9
+gtts>=2.5.0
 
 # Cerebras SDK for fast inference
 cerebras-cloud-sdk>=1.0.0
@@ -17,6 +20,4 @@ python-dotenv>=1.0.0
 requests>=2.31.0
 
 # Optional: For enhanced features
-# livekit-plugins-cartesia  # Alternative TTS
-# livekit-plugins-assemblyai  # Alternative STT
-# livekit-plugins-elevenlabs  # Alternative TTS
+# livekit-plugins-elevenlabs  # Alternative TTS (requires API key)
