@@ -91,6 +91,9 @@ async def entrypoint(ctx: JobContext):
         allow_interruptions=True,
     )
     
+    # Track pause state
+    is_paused = False
+    
     # Set up event listeners for logging
     @session.on("user_input_transcribed")
     def on_user_transcribed(transcription: str):
@@ -99,16 +102,26 @@ async def entrypoint(ctx: JobContext):
         print(f"\n{'='*60}")
         print(f"👤 USER: {transcription}")
         print(f"{'='*60}\n")
+        
+        # If paused, don't process the transcription
+        if is_paused:
+            logger.info("⏸️ Agent is paused - ignoring user input")
+            return
     
     @session.on("conversation_item_added")
     def on_conversation_item(item):
-        """Log conversation items"""
+        """Log conversation items and handle pause state"""
         if hasattr(item, 'role') and hasattr(item, 'content'):
             if item.role == 'assistant':
                 logger.info(f"🤖 AGENT RESPONDED: {item.content}")
                 print(f"\n{'='*60}")
                 print(f"🤖 AGENT: {item.content}")
                 print(f"{'='*60}\n")
+        
+        # If we're paused, don't generate responses
+        if is_paused and hasattr(item, 'role') and item.role == 'user':
+            logger.info("⏸️ Agent is paused - not generating response")
+            return
     
     @session.on("user_state_changed")
     def on_user_state_changed(state):
@@ -119,6 +132,37 @@ async def entrypoint(ctx: JobContext):
     def on_agent_state_changed(state):
         """Log when agent state changes"""
         logger.info(f"🤖 AGENT STATE: {state}")
+    
+    # Add data message handling for pause/resume
+    @ctx.room.on("data_received")
+    def on_data_received(data: rtc.DataPacket):
+        """Handle data messages from frontend (pause/resume)"""
+        nonlocal is_paused
+        try:
+            import json
+            message = json.loads(data.data.decode())
+            action = message.get('action')
+            
+            if action == 'pause':
+                logger.info("⏸️ PAUSE REQUEST: Agent paused by user")
+                is_paused = True
+                # Stop current TTS if playing by interrupting the session
+                session.interrupt()
+                
+            elif action == 'resume':
+                logger.info("▶️ RESUME REQUEST: Agent resuming...")
+                is_paused = False
+                
+                if message.get('requestGreeting', False):
+                    # Generate a very short greeting when resuming, but only if not paused
+                    if not is_paused:
+                        # Schedule the greeting generation without await
+                        session.generate_reply(
+                            instructions="Say a very brief greeting in 1-4 words like 'Hi again' or 'I'm back' or 'Hello there'"
+                        )
+                    
+        except Exception as e:
+            logger.warning(f"Failed to parse data message: {e}")
     
     # Start the session
     await session.start(
@@ -153,12 +197,6 @@ def main():
         WorkerOptions(
             entrypoint_fnc=entrypoint,
             prewarm_fnc=prewarm,  # Add prewarming for better performance
-            
-            # Worker configuration for production
-            max_retry=3,
-            ws_url=livekit_url,
-            api_key=livekit_api_key,
-            api_secret=livekit_api_secret,
         )
     )
 
