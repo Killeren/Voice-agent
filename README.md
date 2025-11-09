@@ -303,7 +303,39 @@ session = AgentSession(
 
 ## 🚀 Production Deployment
 
-### Using Docker (Recommended)
+### Railway (One-Click Deploy)
+
+The easiest way to deploy your voice agent to production:
+
+1. **Fork this repository** to your GitHub account
+
+2. **Sign up for Railway** at [railway.app](https://railway.app)
+
+3. **Deploy with one click:**
+   - Connect your GitHub repository
+   - Railway will automatically detect the `Dockerfile` and `railway.toml`
+   - Set the required environment variables in Railway dashboard:
+     ```
+     LIVEKIT_API_KEY=your_livekit_api_key
+     LIVEKIT_API_SECRET=your_livekit_api_secret
+     LIVEKIT_URL=wss://your-project.livekit.cloud
+     CEREBRAS_API_KEY=your_cerebras_api_key
+     DEEPGRAM_API_KEY=your_deepgram_api_key
+     PERPLEXITY_API_KEY=your_perplexity_api_key
+     ```
+
+4. **Deploy:**
+   ```bash
+   # Or deploy via Railway CLI
+   npm install -g @railway/cli
+   railway login
+   railway link
+   railway up
+   ```
+
+5. **Your voice agent will be live** at your Railway domain!
+
+### Using Docker (Self-Hosted)
 
 1. **Deploy to server:**
    ```bash

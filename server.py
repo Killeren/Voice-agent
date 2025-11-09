@@ -87,12 +87,22 @@ async def handle_index(request):
     return web.Response(text=content, content_type="text/html")
 
 
+async def handle_health(request):
+    """Health check endpoint for Railway and other deployment platforms"""
+    return web.json_response({
+        "status": "healthy",
+        "timestamp": datetime.now().isoformat(),
+        "service": "voice-agent-server"
+    })
+
+
 def create_app():
     """Create and configure the web application"""
     app = web.Application()
     
     # Add routes
     app.router.add_get("/", handle_index)
+    app.router.add_get("/health", handle_health)
     app.router.add_post("/api/token", handle_token_request)
     app.router.add_static("/static", "static", name="static")
     
@@ -102,8 +112,10 @@ def create_app():
 def main():
     """Run the web server"""
     app = create_app()
-    logger.info("Starting web server on http://localhost:8080")
-    web.run_app(app, host="0.0.0.0", port=8080)
+    # Use Railway's PORT environment variable, fallback to 8080 for local development
+    port = int(os.getenv("PORT", 8080))
+    logger.info(f"Starting web server on http://0.0.0.0:{port}")
+    web.run_app(app, host="0.0.0.0", port=port)
 
 
 if __name__ == "__main__":

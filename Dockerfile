@@ -29,6 +29,9 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Copy application code
 COPY . .
 
+# Make startup script executable
+RUN chmod +x start-railway.sh
+
 # Create non-root user for security
 RUN useradd --create-home --shell /bin/bash app && chown -R app:app /app
 USER app
@@ -36,5 +39,5 @@ USER app
 # Expose port for web server
 EXPOSE 8080
 
-# Default command - can be overridden in docker-compose
-CMD ["python", "server.py"]
+# Default command - Railway will use start-railway.sh, Docker Compose can override
+CMD ["./start-railway.sh"]

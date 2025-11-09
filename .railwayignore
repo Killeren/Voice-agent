@@ -1,0 +1,46 @@
+# Railway ignore file - exclude files from deployment
+
+# Development files
+.env
+.env.local
+.env.development
+.env.test
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+*.so
+
+# IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Git
+.git/
+.gitignore
+
+# Docker development files
+docker-compose.yml
+docker-compose.override.yml
+Dockerfile.dev
+
+# Documentation (optional - remove if you want docs deployed)
+README.md
+LICENSE
+
+# Logs
+*.log
+logs/
+
+# Backup files
+*_backup.py
+agent_backup.py
