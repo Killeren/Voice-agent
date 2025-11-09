@@ -1,6 +1,8 @@
 [build]
 # Use the web server as the default service
 builder = "dockerfile"
+# Watch patterns for auto-deploy
+watchPaths = ["**/*.py", "**/*.html", "**/*.js", "**/*.css", "requirements.txt", "Dockerfile"]
 
 [deploy]
 # Start command for both web server and agent
@@ -11,7 +13,3 @@ healthcheckPath = "/"
 healthcheckTimeout = 300
 restartPolicyType = "on_failure"
 restartPolicyMaxRetries = 10
-
-# Auto-deploy on push to main branch
-[build.watchPatterns]
-include = ["**/*.py", "**/*.html", "**/*.js", "**/*.css", "requirements.txt", "Dockerfile"]
