@@ -20,10 +20,13 @@ wheels/
 .installed.cfg
 *.egg
 
-# Virtual Environment
+# Virtual Environment (legacy - now using Docker)
 venv/
 env/
 ENV/
+
+# Docker
+.docker/
 
 # Environment variables
 .env

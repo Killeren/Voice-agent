@@ -5,6 +5,23 @@ AI Voice Assistant with Web Interface using LiveKit Agents 1.2+ and Cerebras
 
 An interactive AI voice assistant that you can talk to directly in your browser. Built with LiveKit for real-time audio communication, Cerebras for ultra-fast AI responses, and Microsoft Edge TTS for free, high-quality voice synthesis.
 
+## ⚡ Quick Start
+
+```bash
+# 1. Clone the repository
+git clone <your-repo-url>
+cd Voice-agent
+
+# 2. Set up environment variables
+cp .env.example .env
+# Edit .env with your API keys
+
+# 3. Start with Docker (requires Docker Desktop)
+docker-compose up --build
+
+# 4. Open http://localhost:8080 in your browser
+```
+
 ## 🚀 Features
 
 - 🎙️ **Real-time voice interaction** with AI
@@ -48,24 +65,21 @@ Voice-agent/
 │   ├── app.js              # JavaScript client
 │   └── style.css           # Web interface styling
 ├── requirements.txt         # Python dependencies
+├── Dockerfile               # Docker container configuration
+├── docker-compose.yml       # Multi-service Docker setup
+├── docker-setup.sh          # Automated setup script
+├── Makefile                # Convenient Docker commands
+├── .dockerignore           # Docker build optimization
 └── README.md               # This documentation
 ```
 
 ## 🛠️ Prerequisites
 
-- **Python 3.8+** installed
-- **FFmpeg** for audio processing:
-  ```bash
-  # macOS
-  brew install ffmpeg
-  
-  # Ubuntu/Debian
-  sudo apt install ffmpeg
-  
-  # Windows
-  # Download from https://ffmpeg.org/download.html
-  ```
+- **Docker Desktop** installed ([docker.com](https://www.docker.com/products/docker-desktop/))
 - **Modern web browser** (Chrome, Firefox, or Edge)
+- **API Keys** (see next section)
+
+> 🐳 **This project runs entirely in Docker containers** - no need to install Python, FFmpeg, or manage virtual environments!
 
 ## 🔑 API Keys Required
 
@@ -100,17 +114,8 @@ You'll need API keys from these services:
 git clone <your-repo-url>
 cd Voice-agent
 
-# Create virtual environment
-python -m venv venv
-
-# Activate virtual environment
-# On macOS/Linux:
-source venv/bin/activate
-# On Windows:
-venv\Scripts\activate
-
-# Install dependencies
-pip install -r requirements.txt
+# Build and start with Docker
+docker-compose up --build
 ```
 
 ### 2. Configure Environment
@@ -138,25 +143,105 @@ LIVEKIT_API_SECRET=your_actual_secret
 
 ### 3. Run the Application
 
-**Terminal 1 - Start Voice Agent:**
+**Start all services with Docker:**
 ```bash
-source venv/bin/activate  # On Windows: venv\Scripts\activate
-python agent.py dev
+docker-compose up --build
 ```
-Wait for: "Voice assistant started successfully"
-
-**Terminal 2 - Start Web Server:**
-```bash
-source venv/bin/activate  # On Windows: venv\Scripts\activate
-python server.py
-```
-Wait for: "Starting web server on http://localhost:8080"
+Wait for both services to start:
+- "Voice assistant started successfully" (agent service)
+- "Starting web server on http://localhost:8080" (web service)
 
 ### 4. Use the Interface
 1. Open browser to `http://localhost:8080`
 2. Click **"Connect"** button
 3. Allow microphone access when prompted
 4. Start talking! The AI will respond with voice
+
+## 🐳 Docker Setup & Commands
+
+### Prerequisites for Docker Setup
+
+1. **Docker Desktop** - Install from [docker.com](https://www.docker.com/products/docker-desktop/)
+2. **Environment Variables** - Copy `.env.example` to `.env` and fill in your API keys
+
+### Docker Services
+
+The application runs two services:
+
+#### voice-agent-server
+- **Purpose**: Web server serving the frontend interface
+- **Port**: 8080
+- **Access**: http://localhost:8080
+
+#### voice-agent-worker  
+- **Purpose**: LiveKit agent worker for voice processing
+- **Dependencies**: Requires the server to be running
+
+### Basic Operations
+```bash
+# Start services (builds automatically on first run)
+docker-compose up
+
+# Start in background
+docker-compose up -d
+
+# Stop services
+docker-compose down
+
+# Restart services
+docker-compose restart
+
+# Rebuild after code changes
+docker-compose up --build
+
+# View logs
+docker-compose logs -f
+
+# Check service status
+docker-compose ps
+```
+
+### Development
+```bash
+# Quick rebuild and restart
+make dev-restart
+
+# View logs for specific service
+docker-compose logs voice-agent-worker
+docker-compose logs voice-agent-server
+
+# Execute commands in running container
+docker-compose exec voice-agent-server bash
+```
+
+### Development with Live Code Reloading
+
+For development with live code reloading, you can mount the source code as a volume by modifying the docker-compose.yml:
+
+```yaml
+volumes:
+  - .:/app
+  - ./.env:/app/.env:ro
+```
+
+### Docker Troubleshooting
+
+#### Port already in use:
+If port 8080 is already in use, modify the port mapping in docker-compose.yml:
+```yaml
+ports:
+  - "8081:8080"  # Use 8081 instead of 8080
+```
+
+#### LiveKit connection issues:
+- Ensure LiveKit server is running and accessible
+- For local LiveKit server, use `LIVEKIT_URL=ws://host.docker.internal:7880`
+- For external LiveKit server, use the full URL
+
+#### Environment variables not loading:
+- Ensure `.env` file exists in the project root
+- Check that all required variables are set
+- Restart containers after changing .env: `docker-compose restart`
 
 ## 🎛️ Customization
 
@@ -166,6 +251,11 @@ Edit the instructions in `agent.py`:
 agent = Agent(
     instructions="You are a helpful assistant. Be concise and friendly."
 )
+```
+
+After making changes, restart the containers:
+```bash
+docker-compose restart
 ```
 
 ### Change Voice (26+ Options Available)
@@ -213,64 +303,30 @@ session = AgentSession(
 
 ## 🚀 Production Deployment
 
-### Using systemd (Linux)
+### Using Docker (Recommended)
 
 1. **Deploy to server:**
    ```bash
-   # On Ubuntu/Debian server
-   sudo apt update && sudo apt install python3.10 python3.10-venv nginx -y
+   # Install Docker and Docker Compose on your server
+   sudo apt update && sudo apt install docker.io docker-compose nginx -y
+   sudo usermod -aG docker $USER
+   
+   # Clone and deploy
    cd /opt
    sudo git clone <your-repo> voice-agent
    cd voice-agent
-   sudo python3 -m venv venv
-   sudo venv/bin/pip install -r requirements.txt
    ```
 
-2. **Create systemd services:**
-   
-   **Voice Agent Service** (`/etc/systemd/system/voice-agent.service`):
-   ```ini
-   [Unit]
-   Description=Voice Agent Worker
-   After=network.target
-   
-   [Service]
-   Type=simple
-   User=www-data
-   WorkingDirectory=/opt/voice-agent
-   Environment="PATH=/opt/voice-agent/venv/bin"
-   ExecStart=/opt/voice-agent/venv/bin/python agent.py start
-   Restart=always
-   RestartSec=10
-   
-   [Install]
-   WantedBy=multi-user.target
-   ```
-
-   **Web Server Service** (`/etc/systemd/system/voice-agent-web.service`):
-   ```ini
-   [Unit]
-   Description=Voice Agent Web Server
-   After=network.target
-   
-   [Service]
-   Type=simple
-   User=www-data
-   WorkingDirectory=/opt/voice-agent
-   Environment="PATH=/opt/voice-agent/venv/bin"
-   ExecStart=/opt/voice-agent/venv/bin/python server.py
-   Restart=always
-   RestartSec=10
-   
-   [Install]
-   WantedBy=multi-user.target
-   ```
-
-3. **Enable and start:**
+2. **Configure environment:**
    ```bash
-   sudo systemctl daemon-reload
-   sudo systemctl enable voice-agent voice-agent-web
-   sudo systemctl start voice-agent voice-agent-web
+   sudo cp .env.example .env
+   # Edit .env with your production API keys
+   sudo nano .env
+   ```
+
+3. **Start with Docker Compose:**
+   ```bash
+   sudo docker-compose up -d --build
    ```
 
 4. **Configure Nginx** (`/etc/nginx/sites-available/voice-agent`):
@@ -289,21 +345,14 @@ session = AgentSession(
    }
    ```
 
-### Using Docker
-```dockerfile
-FROM python:3.10-slim
+### Alternative: Manual Docker Build
+```bash
+# Build the Docker image
+docker build -t voice-agent .
 
-# Install FFmpeg
-RUN apt-get update && apt-get install -y ffmpeg && rm -rf /var/lib/apt/lists/*
-
-WORKDIR /app
-COPY requirements.txt .
-RUN pip install -r requirements.txt
-
-COPY . .
-
-EXPOSE 8080
-CMD ["python", "server.py"]
+# Run the services manually
+docker run -d --name voice-agent-server -p 8080:8080 --env-file .env voice-agent python server.py
+docker run -d --name voice-agent-worker --env-file .env voice-agent python agent.py start
 ```
 
 ## 🐛 Troubleshooting
@@ -312,8 +361,9 @@ CMD ["python", "server.py"]
 
 **"Connection failed" error:**
 - Make sure LiveKit server is running
-- Verify agent is running (`python agent.py dev`)
+- Verify services are running (`docker-compose ps`)
 - Check API keys in `.env` file
+- Check container logs (`docker-compose logs`)
 
 **Microphone not working:**
 - Check browser permissions (microphone icon in address bar)
@@ -326,8 +376,8 @@ CMD ["python", "server.py"]
 - Check system audio settings
 
 **"Module not found" errors:**
-- Make sure virtual environment is activated
-- Run `pip install -r requirements.txt` again
+- Rebuild Docker containers: `docker-compose down && docker-compose up --build`
+- Check if all services are running: `docker-compose ps`
 
 **Edge TTS fails:**
 - Check internet connection
@@ -336,16 +386,25 @@ CMD ["python", "server.py"]
 
 ### Debug Mode
 ```bash
-LIVEKIT_LOG_LEVEL=debug python agent.py dev
+# View logs from Docker containers
+docker-compose logs -f
+
+# Debug specific service
+docker-compose logs voice-agent-worker
+docker-compose logs voice-agent-server
+
+# Run with debug logging
+LIVEKIT_LOG_LEVEL=debug docker-compose up
 ```
 
 ## 🔄 Migration from v1.0
 
 If upgrading from an older version:
 
-1. **Update dependencies:**
+1. **Update containers:**
    ```bash
-   pip install -r requirements.txt
+   docker-compose down
+   docker-compose up --build
    ```
 
 2. **Remove old TTS configurations** from `agent.py` and use Edge TTS instead
@@ -374,6 +433,29 @@ If upgrading from an older version:
 ## 📄 License
 
 MIT License - see LICENSE file for details
+
+## 📦 Migration from Virtual Environment
+
+This project has been **fully containerized with Docker**! If you were previously using virtual environments:
+
+### What Changed
+- ❌ **No more `venv/` directory** - everything runs in Docker containers
+- ❌ **No more `pip install`** - dependencies are handled by Docker
+- ❌ **No more Python version conflicts** - Docker ensures consistent environment
+- ✅ **One command setup**: `docker-compose up --build`
+- ✅ **Consistent across all platforms** - works the same on Windows, macOS, Linux
+
+### Quick Migration
+```bash
+# Old way (don't do this anymore)
+# python -m venv venv
+# source venv/bin/activate
+# pip install -r requirements.txt
+# python server.py & python agent.py start
+
+# New way (Docker)
+docker-compose up --build
+```
 
 ## 🤝 Contributing
 
