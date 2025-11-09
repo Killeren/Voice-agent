@@ -40,3 +40,10 @@ Thumbs.db
 
 # Logs
 *.log
+
+# TTS Output (temporary files)
+tts_output/
+
+# Testing environments
+venv_tts/
+*_test/
