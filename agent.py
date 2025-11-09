@@ -312,7 +312,7 @@ async def entrypoint(ctx: JobContext):
     await session.start(agent=agent, room=ctx.room)
     
     # Send initial greeting since we disabled automatic LLM
-    initial_greeting = "Hello there, how are you doing today? I'm here to help with anything you need. Want to talk about news, find some information, or just ask a question? What's on your mind?"
+    initial_greeting = "Hello! I'm your AI voice agent ready to help with questions or find current information."
     await session.say(initial_greeting)
     
     @session.on("user_input_transcribed")
