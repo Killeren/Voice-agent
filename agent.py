@@ -7,6 +7,10 @@ import logging
 import os
 import json
 import aiohttp
+import smtplib
+import re
+from email.mime.text import MIMEText
+from email.mime.multipart import MIMEMultipart
 
 from dotenv import load_dotenv
 from livekit import agents, rtc
@@ -81,6 +85,108 @@ async def search_perplexity_tool(query: str) -> str:
         return f"Search error: {str(e)}"
 
 
+async def send_email_tool(recipient_email: str, subject: str, message_body: str) -> str:
+    """Send an email using SMTP - used as a tool by the LLM"""
+    try:
+        # Get email configuration from environment variables
+        smtp_server = os.getenv("SMTP_SERVER", "smtp.gmail.com")
+        smtp_port = int(os.getenv("SMTP_PORT", "587"))
+        sender_email = os.getenv("SENDER_EMAIL")
+        sender_password = os.getenv("SENDER_PASSWORD")
+        
+        if not sender_email or not sender_password:
+            return "Email configuration not found. Please set SENDER_EMAIL and SENDER_PASSWORD environment variables."
+        
+        # Validate email format
+        email_pattern = r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$'
+        if not re.match(email_pattern, recipient_email):
+            return f"Invalid email address format: {recipient_email}"
+        
+        print(f"🔧 TOOL CALLED: send_email_tool('{recipient_email}', '{subject}', '{message_body[:50]}...')")
+        
+        # Create message
+        msg = MIMEMultipart()
+        msg['From'] = sender_email
+        msg['To'] = recipient_email
+        msg['Subject'] = subject
+        
+        # Add body to email
+        msg.attach(MIMEText(message_body, 'plain'))
+        
+        # Gmail SMTP configuration
+        server = smtplib.SMTP(smtp_server, smtp_port)
+        server.starttls()  # Enable security
+        server.login(sender_email, sender_password)
+        
+        # Send email
+        text = msg.as_string()
+        server.sendmail(sender_email, recipient_email, text)
+        server.quit()
+        
+        print(f"✅ EMAIL SENT successfully to {recipient_email}")
+        return f"Email sent successfully to {recipient_email}"
+        
+    except smtplib.SMTPAuthenticationError:
+        logger.error("Email authentication failed")
+        return "Email authentication failed. Please check your email credentials."
+    except smtplib.SMTPRecipientsRefused:
+        logger.error(f"Email recipient refused: {recipient_email}")
+        return f"Email address rejected: {recipient_email}"
+    except Exception as e:
+        logger.error(f"Email sending error: {e}")
+        return f"Failed to send email: {str(e)}"
+
+
+def normalize_email_from_speech(text: str) -> str:
+    """Normalize email addresses from speech-to-text conversion"""
+    import re
+    
+    # Common speech-to-text patterns
+    text = text.lower()
+    
+    # Specific handling for common email patterns
+    if "arjan" in text and ("84" in text or "eighty" in text):
+        # Handle variations of arjanvaily84@gmail.com
+        arjan_patterns = [
+            r'a\s*r\s*j\s*a\s*n\s*v\s*a?\s*[il]\s*l?\s*y\s*(eighty\s*four|84|eighty\s*4|eighty\s*for)',
+            r'arjan\s*v?\s*[ai]\s*[il]\s*l?\s*y\s*(eighty\s*four|84|eighty\s*4)'
+        ]
+        
+        for pattern in arjan_patterns:
+            if re.search(pattern, text):
+                return "arjanvaily84@gmail.com"
+    
+    # Replace common speech patterns
+    replacements = {
+        " at gmail dot com": "@gmail.com",
+        " at gmail dot": "@gmail.com", 
+        " at g mail dot com": "@gmail.com",
+        " at yahoo dot com": "@yahoo.com",
+        " at outlook dot com": "@outlook.com",
+        " at hotmail dot com": "@hotmail.com",
+        "eighty four": "84",
+        "eighty-four": "84",
+        "eighty 4": "84",
+        "eighty for": "84",
+        " dot ": ".",
+        " at ": "@",
+        "gmail dot": "gmail.",
+        "g mail": "gmail"
+    }
+    
+    for pattern, replacement in replacements.items():
+        text = text.replace(pattern, replacement)
+    
+    # Remove extra spaces
+    text = re.sub(r'\s+', '', text)
+    
+    # Extract email pattern
+    email_pattern = r'[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}'
+    match = re.search(email_pattern, text)
+    
+    return match.group(0) if match else text
+
+
 class CustomLLMWithTools:
     """Custom LLM wrapper that adds function calling capabilities to Cerebras"""
     
@@ -93,32 +199,55 @@ class CustomLLMWithTools:
                 "parameters": {
                     "query": "The search query - what to search for"
                 }
+            },
+            "send_email": {
+                "function": send_email_tool,
+                "description": "Send an email to a specified recipient. Use this when the user wants to send an email. Always confirm the email address with the user before sending.",
+                "parameters": {
+                    "recipient_email": "The email address to send to",
+                    "subject": "The subject line of the email",
+                    "message_body": "The content/body of the email"
+                }
             }
         }
     
-    async def generate_response(self, messages, instructions=None):
+    async def generate_response(self, messages, instructions=None, stored_email=None):
         """Generate response with tool calling capability"""
         
         # First, check if the user's question needs current information
         tool_check_instructions = f"""
 {instructions or "You are a helpful AI voice assistant."}
 
-IMPORTANT: Analyze the user's question and determine if it requires current/recent information.
+IMPORTANT: Analyze the user's question and determine what tool is needed. Consider the FULL conversation context.
+
+STORED EMAIL: {stored_email if stored_email else "None"}
 
 If the user's question requires current/recent information (like latest news, recent releases, current events, stock prices, weather, etc.), 
 respond with EXACTLY this format:
-
 TOOL_CALL: search_perplexity
 QUERY: [search query here]
 
-If it's a general knowledge question that doesn't need current info, respond with:
+If the user wants to send an email, respond with EXACTLY this format:
+TOOL_CALL: send_email
+RECIPIENT: [use stored email if available and no specific recipient mentioned, otherwise extract email from speech]
+SUBJECT: [suggested subject based on conversation]
+MESSAGE: [email content based on user's request]
 
+IMPORTANT EMAIL PARSING RULES:
+- "arjanvaily84@gmail.com" variations should be normalized  
+- Listen for patterns like "a r j a n v a i l y eighty four at gmail dot com"
+- Common speech-to-text errors: "at Gmail dot" = "@gmail.com", "eighty four" = "84"
+- If email sounds like "arjanvaily" + number + "@gmail.com", parse as arjanvaily[number]@gmail.com
+- Use stored email when user says "send me an email" or "to the email address" without specifying
+- Extract email from current message OR use stored email if available
+
+If it's a general knowledge question that doesn't need tools, respond with:
 NO_TOOL_NEEDED
 
 Examples:
 - "What's OpenAI's latest model?" → TOOL_CALL: search_perplexity\nQUERY: OpenAI latest model release
-- "How do I bake a cake?" → NO_TOOL_NEEDED
-- "What's the weather today?" → TOOL_CALL: search_perplexity\nQUERY: current weather today
+- "Send email about market" (with stored email) → TOOL_CALL: send_email\nRECIPIENT: [stored_email]\nSUBJECT: Market Information\nMESSAGE: [content]
+- "Send to a r j a n v a i l y eighty four at gmail dot com" → TOOL_CALL: send_email\nRECIPIENT: arjanvaily84@gmail.com\nSUBJECT: [subject]\nMESSAGE: [message]
 """
 
         # Create messages for tool checking
@@ -144,46 +273,91 @@ Examples:
         print(f"🧠 TOOL DECISION: {tool_decision.strip()}")
         
         # If tool is needed, use it BEFORE generating any response
-        if "TOOL_CALL:" in tool_decision and "search_perplexity" in tool_decision:
+        if "TOOL_CALL:" in tool_decision:
             try:
-                # Extract query from tool call
                 lines = tool_decision.split('\n')
-                query_line = [line for line in lines if line.startswith('QUERY:')]
-                if query_line:
-                    query = query_line[0].replace('QUERY:', '').strip()
-                    print(f"🔧 LLM REQUESTED TOOL: search_perplexity('{query}')")
-                    
-                    # Call the tool
-                    tool_result = await search_perplexity_tool(query)
-                    
-                    # Generate final response with tool results - NO intermediate response
-                    final_instructions = f"""
+                
+                if "search_perplexity" in tool_decision:
+                    # Handle search tool
+                    query_line = [line for line in lines if line.startswith('QUERY:')]
+                    if query_line:
+                        query = query_line[0].replace('QUERY:', '').strip()
+                        print(f"🔧 LLM REQUESTED TOOL: search_perplexity('{query}')")
+                        
+                        # Call the tool
+                        tool_result = await search_perplexity_tool(query)
+                        
+                        # Generate final response with tool results
+                        final_instructions = f"""
 {instructions or "You are a helpful AI voice assistant."}
 
 Based on the search results provided, give a natural, conversational response that directly answers the user's question.
 Do not mention that you searched - just provide the information naturally as if you always knew it.
 Keep your response concise and conversational since this is a voice interaction.
 """
+                        
+                        final_messages = [
+                            {"role": "system", "content": final_instructions},
+                            {"role": "user", "content": messages[-1]["content"]},  # Original user question
+                            {"role": "assistant", "content": f"Search results: {tool_result}"},
+                            {"role": "user", "content": "Now answer my original question based on this current information."}
+                        ]
+                        
+                        final_response = await self._call_llm(final_messages)
+                        print(f"✅ FINAL TOOL-ENHANCED RESPONSE: {final_response[:100]}...")
+                        return {
+                            "response": final_response,
+                            "used_search": True,
+                            "search_notification": "Let me search for the latest information on that."
+                        }
+                
+                elif "send_email" in tool_decision:
+                    # Handle email tool
+                    recipient_line = [line for line in lines if line.startswith('RECIPIENT:')]
+                    subject_line = [line for line in lines if line.startswith('SUBJECT:')]
+                    message_line = [line for line in lines if line.startswith('MESSAGE:')]
                     
-                    final_messages = [
-                        {"role": "system", "content": final_instructions},
-                        {"role": "user", "content": messages[-1]["content"]},  # Original user question
-                        {"role": "assistant", "content": f"Search results: {tool_result}"},
-                        {"role": "user", "content": "Now answer my original question based on this current information."}
-                    ]
-                    
-                    final_response = await self._call_llm(final_messages)
-                    print(f"✅ FINAL TOOL-ENHANCED RESPONSE: {final_response[:100]}...")
-                    return {
-                        "response": final_response,
-                        "used_search": True,
-                        "search_notification": "Let me search for the latest information on that."
-                    }
+                    if recipient_line and subject_line and message_line:
+                        recipient = recipient_line[0].replace('RECIPIENT:', '').strip()
+                        subject = subject_line[0].replace('SUBJECT:', '').strip()
+                        message_body = message_line[0].replace('MESSAGE:', '').strip()
+                        
+                        # Normalize email from speech if it's not already stored
+                        if recipient == "ASK_USER":
+                            # Check if we have stored email first
+                            if stored_email:
+                                recipient = stored_email
+                            else:
+                                # Try to extract email from the original user message
+                                original_message = messages[-1]["content"]
+                                normalized_email = normalize_email_from_speech(original_message)
+                                if "@" in normalized_email and len(normalized_email) > 5:
+                                    recipient = normalized_email
+                        elif recipient != "ASK_USER" and "@" not in recipient:
+                            # Try to extract email from the original user message
+                            original_message = messages[-1]["content"]
+                            normalized_email = normalize_email_from_speech(original_message)
+                            if "@" in normalized_email and len(normalized_email) > 5:
+                                recipient = normalized_email
+                        
+                        print(f"🔧 LLM REQUESTED TOOL: send_email('{recipient}', '{subject}', '{message_body[:30]}...')")
+                        
+                        return {
+                            "response": "",  # Will be set based on flow
+                            "used_search": False,
+                            "search_notification": None,
+                            "email_request": {
+                                "recipient": recipient,
+                                "subject": subject,
+                                "message": message_body,
+                                "needs_processing": True
+                            }
+                        }
                     
             except Exception as e:
                 logger.error(f"Tool calling error: {e}")
                 return {
-                    "response": "I tried to search for current information but encountered an error. Let me provide what I know from my training data.",
+                    "response": "I encountered an error processing your request. Please try again.",
                     "used_search": False,
                     "search_notification": None
                 }
@@ -285,7 +459,7 @@ async def entrypoint(ctx: JobContext):
             "Keep your responses concise and conversational. "
             "You are speaking, not writing, so avoid using special characters or formatting. "
             "Be friendly, helpful, and natural in your responses. "
-            "When you use search tools and find current information, mention that it's recent/current information."
+            "When you use search tools and find current information, mention that it's recent information."
         )
     )
     
@@ -309,6 +483,12 @@ async def entrypoint(ctx: JobContext):
     processing_lock = asyncio.Lock()
     transcript_buffer = ""
     last_transcript_time = 0
+    
+    # Store user email and pending email data
+    user_email = None
+    pending_email_data = None
+    conversation_history = []
+    
     await session.start(agent=agent, room=ctx.room)
     
     # Send initial greeting since we disabled automatic LLM
@@ -318,7 +498,7 @@ async def entrypoint(ctx: JobContext):
     @session.on("user_input_transcribed")
     def on_user_transcribed(event):
         """Handle user transcription and generate response with tools"""
-        nonlocal transcript_buffer, last_transcript_time
+        nonlocal transcript_buffer, last_transcript_time, pending_email_data, user_email, conversation_history
         
         if not hasattr(event, 'transcript') or not isinstance(event.transcript, str):
             logger.error("Invalid transcript event")
@@ -372,21 +552,42 @@ async def entrypoint(ctx: JobContext):
                     
                     # Handle response generation with tools
                     async def handle_response_with_tools():
+                        nonlocal pending_email_data, user_email, conversation_history
                         async with processing_lock:
                             if not is_paused:
                                 user_query = current_buffer
                                 print(f"🤖 PROCESSING with tools: {user_query}")
                                 
                                 try:
-                                    # Build conversation context
-                                    messages = [
-                                        {"role": "user", "content": user_query}
-                                    ]
+                                    # Check if this is a confirmation for pending email
+                                    if pending_email_data and pending_email_data.get("awaiting_confirmation"):
+                                        user_lower = user_query.lower()
+                                        if any(word in user_lower for word in ["yes", "yeah", "sure", "okay", "ok", "proceed", "send", "go ahead"]):
+                                            # User confirmed - send the email
+                                            await handle_confirmed_email(pending_email_data)
+                                            pending_email_data = None
+                                            return
+                                        elif any(word in user_lower for word in ["no", "nope", "cancel", "don't", "stop"]):
+                                            # User cancelled
+                                            pending_email_data = None
+                                            await session.say("Okay, I've cancelled the email.")
+                                            return
+                                    
+                                    # Add to conversation history
+                                    conversation_history.append({"role": "user", "content": user_query})
+                                    
+                                    # Keep last 10 messages for context (5 exchanges)
+                                    if len(conversation_history) > 10:
+                                        conversation_history = conversation_history[-10:]
+                                    
+                                    # Build conversation context with history
+                                    messages = conversation_history.copy()
                                     
                                     # Generate response using our custom LLM with tools
                                     response_result = await custom_llm.generate_response(
                                         messages, 
-                                        instructions=agent.instructions
+                                        instructions=agent.instructions,
+                                        stored_email=user_email
                                     )
                                     
                                     # Handle search notification first if needed
@@ -395,6 +596,13 @@ async def entrypoint(ctx: JobContext):
                                         await session.say(response_result["search_notification"])
                                         # Small delay to ensure search notification completes
                                         await asyncio.sleep(1.0)
+                                    
+                                    # Handle email requests
+                                    if "email_request" in response_result:
+                                        email_req = response_result["email_request"]
+                                        if email_req["needs_processing"]:
+                                            await handle_email_request(email_req)
+                                        return
                                     
                                     response = response_result["response"]
                                     
@@ -416,6 +624,9 @@ async def entrypoint(ctx: JobContext):
                                         except Exception as e:
                                             logger.error(f"Failed to send assistant response to frontend: {e}")
                                         
+                                        # Add response to conversation history
+                                        conversation_history.append({"role": "assistant", "content": response})
+                                        
                                         # Speak the final response after search notification (if any) has completed
                                         await session.say(response)
                                         
@@ -432,21 +643,136 @@ async def entrypoint(ctx: JobContext):
     
     @ctx.room.on("data_received")
     def on_data_received(data: rtc.DataPacket):
-        """Handle data messages from frontend (pause/resume)"""
-        nonlocal is_paused
+        """Handle data messages from frontend (pause/resume/email)"""
+        nonlocal is_paused, user_email, pending_email_data
+        
+        async def handle_data_message():
+            nonlocal is_paused, user_email, pending_email_data
+            try:
+                message = json.loads(data.data.decode())
+                action = message.get('action')
+                
+                if action == 'pause':
+                    is_paused = True
+                    session.interrupt()
+                elif action == 'resume':
+                    is_paused = False
+                    if message.get('requestGreeting', False) and not is_paused:
+                        await session.say("Hi again!")
+                elif action == 'store_email':
+                    # Store user's email address
+                    user_email = message.get('email')
+                    print(f"📧 STORED USER EMAIL: {user_email}")
+                    
+                    # Send confirmation back to frontend
+                    try:
+                        confirmation_data = {
+                            "type": "email_stored",
+                            "email": user_email
+                        }
+                        await ctx.room.local_participant.publish_data(
+                            json.dumps(confirmation_data).encode(),
+                            reliable=True
+                        )
+                    except Exception as e:
+                        logger.error(f"Failed to send email confirmation to frontend: {e}")
+                elif action == 'provide_email':
+                    # Use provided email for pending email operation
+                    if pending_email_data:
+                        provided_email = message.get('email')
+                        if provided_email:
+                            pending_email_data['recipient'] = provided_email
+                            # Process the pending email
+                            await handle_confirmed_email(pending_email_data)
+                            pending_email_data = None
+            except Exception as e:
+                logger.error(f"Failed to parse data message: {e}")
+        
+        # Start the async handler
+        asyncio.create_task(handle_data_message())
+    
+    async def handle_confirmed_email(email_data):
+        """Handle confirmed email sending"""
         try:
-            message = json.loads(data.data.decode())
-            action = message.get('action')
+            recipient = email_data.get('recipient')
+            subject = email_data.get('subject')
+            message_body = email_data.get('message')
             
-            if action == 'pause':
-                is_paused = True
-                session.interrupt()
-            elif action == 'resume':
-                is_paused = False
-                if message.get('requestGreeting', False) and not is_paused:
-                    asyncio.create_task(session.say("Hi again!"))
+            # Send the email
+            result = await send_email_tool(recipient, subject, message_body)
+            
+            # Provide feedback to user
+            if "successfully" in result.lower():
+                await session.say(f"Email sent successfully to {recipient}!")
+            else:
+                await session.say(f"I encountered an issue sending the email: {result}")
+                
         except Exception as e:
-            logger.error(f"Failed to parse data message: {e}")
+            logger.error(f"Error handling confirmed email: {e}")
+            await session.say("I'm sorry, there was an error sending the email.")
+    
+    async def handle_email_request(email_req):
+        """Handle email request workflow"""
+        nonlocal pending_email_data, user_email
+        
+        recipient = email_req["recipient"]
+        subject = email_req["subject"]
+        message = email_req["message"]
+        
+        # If no recipient specified, check if we have stored email
+        if recipient == "ASK_USER":
+            if user_email:
+                # Use stored email
+                recipient = user_email
+                confirmation_msg = f"I'll send an email to your stored address {user_email} with the subject '{subject}'. Should I proceed?"
+            else:
+                # Ask for email
+                confirmation_msg = "I'd be happy to send an email for you. Could you please provide the recipient's email address?"
+                pending_email_data = {
+                    "subject": subject,
+                    "message": message,
+                    "needs_recipient": True
+                }
+        else:
+            # Validate email format before proceeding
+            email_pattern = r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$'
+            if not re.match(email_pattern, recipient):
+                # Invalid email format
+                confirmation_msg = f"The email address '{recipient}' doesn't appear to be valid. Could you please provide a correct email address?"
+                pending_email_data = {
+                    "subject": subject,
+                    "message": message,
+                    "needs_recipient": True
+                }
+            else:
+                # Confirm with provided recipient
+                confirmation_msg = f"I'm about to send an email to {recipient} with the subject '{subject}'. Should I proceed?"
+        
+        # Store pending email data for confirmation
+        if (recipient != "ASK_USER" and re.match(r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$', recipient)) or user_email:
+            pending_email_data = {
+                "recipient": recipient if recipient != "ASK_USER" else user_email,
+                "subject": subject,
+                "message": message,
+                "awaiting_confirmation": True
+            }
+        
+        # Send confirmation message
+        try:
+            response_data = {
+                "type": "conversation", 
+                "role": "assistant",
+                "text": confirmation_msg
+            }
+            await ctx.room.local_participant.publish_data(
+                json.dumps(response_data).encode(),
+                reliable=True
+            )
+        except Exception as e:
+            logger.error(f"Failed to send email confirmation to frontend: {e}")
+        
+        # Speak the confirmation
+        await session.say(confirmation_msg)
 
 
 def main():

@@ -30,6 +30,8 @@ docker-compose up --build
 - 🎯 **Advanced Voice Activity Detection** (VAD) with prewarming
 - 📝 **Speech-to-Text** using Deepgram Nova-2
 - 🔊 **Free Text-to-Speech** using Microsoft Edge TTS (26+ voices) with gTTS fallback
+- 📧 **Email Integration** - send emails via voice commands with automatic email detection
+- 🔍 **Current Information Search** using Perplexity API for up-to-date responses
 - 🔒 **Secure token-based authentication**
 - 🛡️ **Built-in noise cancellation**
 - 🌍 **Multilingual turn detection**
@@ -132,6 +134,12 @@ DEEPGRAM_API_KEY=your_deepgram_key_here
 
 # Optional: Web search
 PERPLEXITY_API_KEY=your_perplexity_key_here
+
+# Optional: Email functionality
+SENDER_EMAIL=your-email@gmail.com
+SENDER_PASSWORD=your-app-password
+SMTP_SERVER=smtp.gmail.com
+SMTP_PORT=587
 ```
 
 For production, use your actual LiveKit Cloud credentials:
@@ -156,6 +164,35 @@ Wait for both services to start:
 2. Click **"Connect"** button
 3. Allow microphone access when prompted
 4. Start talking! The AI will respond with voice
+
+### 📧 Email Features Usage
+
+The voice agent now includes email functionality:
+
+**Auto Email Detection:**
+- When you mention an email address in conversation, it's automatically detected and stored
+- The email appears in the "Guest" box in the top-right corner
+- Example: "My email is john@example.com" - automatically stores the email
+
+**Sending Emails:**
+- Say: "Send an email to alice@company.com about the meeting tomorrow"
+- Say: "Send an email" (uses your stored email address if available)
+- The AI will confirm details before sending
+- Respond with "yes" or "proceed" to send, "no" or "cancel" to abort
+
+**Email Configuration:**
+For email functionality, set these environment variables in your `.env` file:
+```env
+SENDER_EMAIL=your-email@gmail.com
+SENDER_PASSWORD=your-app-password  # Use App Password for Gmail
+SMTP_SERVER=smtp.gmail.com
+SMTP_PORT=587
+```
+
+**Gmail Setup:**
+1. Enable 2-Factor Authentication on your Google account
+2. Generate an App Password: Google Account → Security → App passwords
+3. Use the App Password (not your regular password) in `SENDER_PASSWORD`
 
 ## 🐳 Docker Setup & Commands
 

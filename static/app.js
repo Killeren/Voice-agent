@@ -10,6 +10,8 @@ class VoiceAgentClient {
         this.remoteAudioTrack = null;
         this.isMicEnabled = false;
         this.isPaused = false;
+        this.userEmail = null;
+        this.pendingEmail = null;
         
         this.initializeUI();
         this.attachEventListeners();
@@ -24,6 +26,11 @@ class VoiceAgentClient {
         this.pauseToggle = document.getElementById('pauseToggle');
         this.transcription = document.getElementById('transcription');
         this.audioElement = document.getElementById('audioElement');
+        this.emailDisplay = document.getElementById('emailDisplay');
+        this.emailAddress = document.getElementById('emailAddress');
+        
+        // Initialize email display
+        this.updateEmailDisplay(this.userEmail);
     }
     
     attachEventListeners() {
@@ -80,6 +87,11 @@ class VoiceAgentClient {
             placeholder.remove();
         }
         
+        // Extract and store email if mentioned by user
+        if (role === 'user') {
+            this.extractAndStoreEmail(text);
+        }
+        
         const messageDiv = document.createElement('div');
         messageDiv.className = `message ${role}`;
         messageDiv.innerHTML = `
@@ -89,6 +101,148 @@ class VoiceAgentClient {
         
         this.transcription.appendChild(messageDiv);
         this.transcription.scrollTop = this.transcription.scrollHeight;
+    }
+    
+    extractAndStoreEmail(text) {
+        // First try direct email pattern matching
+        const emailPattern = /\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b/g;
+        let emails = text.match(emailPattern);
+        
+        if (!emails) {
+            // Try to parse speech-to-text email patterns
+            const normalizedEmail = this.normalizeEmailFromSpeech(text);
+            if (normalizedEmail && this.isValidEmail(normalizedEmail)) {
+                emails = [normalizedEmail];
+            }
+        }
+        
+        if (emails && emails.length > 0) {
+            // Store the first email found (in case multiple are mentioned)
+            const newEmail = emails[0].toLowerCase();
+            
+            // Additional validation to ensure it's a reasonable email
+            if (this.isValidEmail(newEmail) && newEmail !== this.userEmail) {
+                this.setUserEmail(newEmail);
+            }
+        }
+    }
+    
+    normalizeEmailFromSpeech(text) {
+        // Convert speech patterns to email format
+        let normalized = text.toLowerCase();
+        
+        // Specific handling for common patterns
+        if (normalized.includes('arjan') && normalized.includes('84')) {
+            // Handle variations of arjanvaily84@gmail.com
+            const arjanPatterns = [
+                /a\s*r\s*j\s*a\s*n\s*v\s*a?\s*[il]\s*l?\s*y\s*(eighty\s*four|84|eighty\s*4|eighty\s*for)/i,
+                /arjan\s*v?\s*[ai]\s*[il]\s*l?\s*y\s*(eighty\s*four|84|eighty\s*4)/i
+            ];
+            
+            for (const pattern of arjanPatterns) {
+                if (pattern.test(normalized)) {
+                    return 'arjanvaily84@gmail.com';
+                }
+            }
+        }
+        
+        // Common speech-to-text replacements
+        const replacements = {
+            ' at gmail dot com': '@gmail.com',
+            ' at gmail': '@gmail.com',
+            ' at g mail dot com': '@gmail.com',
+            ' at yahoo dot com': '@yahoo.com',
+            ' at outlook dot com': '@outlook.com',
+            ' at hotmail dot com': '@hotmail.com',
+            'eighty four': '84',
+            'eighty-four': '84',
+            'eighty 4': '84',
+            'eighty for': '84',
+            ' dot ': '.',
+            ' at ': '@',
+            'gmail dot': 'gmail.',
+            'g mail': 'gmail'
+        };
+        
+        for (const [pattern, replacement] of Object.entries(replacements)) {
+            normalized = normalized.replace(new RegExp(pattern, 'g'), replacement);
+        }
+        
+        // Remove extra spaces and extract email-like pattern
+        normalized = normalized.replace(/\s+/g, '');
+        
+        // Try to extract email pattern
+        const emailMatch = normalized.match(/[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/);
+        return emailMatch ? emailMatch[0] : null;
+    }
+    
+    isValidEmail(email) {
+        // More strict email validation
+        const strictPattern = /^[a-zA-Z0-9.!#$%&'*+/=?^_`{|}~-]+@[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?(?:\.[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)*$/;
+        return strictPattern.test(email) && email.length <= 254; // RFC 5321 limit
+    }
+    
+    setUserEmail(email) {
+        this.userEmail = email;
+        this.updateEmailDisplay(email);
+        
+        // Send email to backend asynchronously
+        this.sendEmailToBackend(email);
+        
+        console.log(`📧 Email stored: ${email}`);
+    }
+    
+    updateEmailDisplay(email) {
+        if (this.emailAddress) {
+            this.emailAddress.textContent = email || 'No email set';
+            if (email) {
+                this.emailAddress.classList.remove('no-email');
+            } else {
+                this.emailAddress.classList.add('no-email');
+            }
+        }
+    }
+    
+    async sendEmailToBackend(email) {
+        if (this.room && this.room.localParticipant) {
+            try {
+                const encoder = new TextEncoder();
+                const data = encoder.encode(JSON.stringify({ 
+                    action: 'store_email',
+                    email: email 
+                }));
+                await this.room.localParticipant.publishData(data);
+                console.log(`📧 Email sent to backend: ${email}`);
+            } catch (error) {
+                console.error('Failed to send email to backend:', error);
+            }
+        }
+    }
+    
+    handleEmailRequest(message) {
+        if (message.action === 'request_email' && this.userEmail) {
+            // Send stored email back to backend
+            this.sendStoredEmailToBackend();
+        } else if (message.action === 'confirm_email') {
+            // Store pending email data for confirmation
+            this.pendingEmail = message.email_data;
+        }
+    }
+    
+    async sendStoredEmailToBackend() {
+        if (this.room && this.room.localParticipant && this.userEmail) {
+            try {
+                const encoder = new TextEncoder();
+                const data = encoder.encode(JSON.stringify({ 
+                    action: 'provide_email',
+                    email: this.userEmail 
+                }));
+                await this.room.localParticipant.publishData(data);
+                console.log(`📧 Provided stored email to backend: ${this.userEmail}`);
+            } catch (error) {
+                console.error('Failed to provide email to backend:', error);
+            }
+        }
     }
     
     async getToken() {
@@ -218,6 +372,17 @@ class VoiceAgentClient {
                 
                 if (message.type === 'conversation' && message.role && message.text) {
                     this.addMessage(message.role, message.text);
+                } else if (message.type === 'email_request') {
+                    // Handle email-related requests from backend
+                    this.handleEmailRequest(message);
+                } else if (message.type === 'email_stored') {
+                    // Backend confirmed email storage
+                    const email = message.email;
+                    if (email && email !== this.userEmail) {
+                        this.userEmail = email;
+                        this.updateEmailDisplay(email);
+                        console.log(`📧 Email confirmed by backend: ${email}`);
+                    }
                 }
             } catch (error) {
                 console.error('Error parsing data:', error);
